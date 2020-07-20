@@ -221,26 +221,21 @@ rm(dataTrain)
 Write the ngrams to files as a backup if they don't exist
 
 ```{r ngramTrainWrite}
-if(!file.exists("data/final/en_US/ngram/en_US.dataTrain.1gram.txt")){
-      write.table(unigramsTrain,
-                  file="data/final/en_US/ngram/en_US.dataTrain.1gram.txt", sep=",",
-                  col.names=FALSE, row.names=FALSE, quote=FALSE)}
+if(!file.exists("data/final/en_US/ngram/en_US.dataTrain.1gram.rds")){
+      saveRDS(unigramsTrain,
+                  file="data/final/en_US/ngram/en_US.dataTrain.1gram.rds")}
 
-if(!file.exists("data/final/en_US/ngram/en_US.dataTrain.2gram.txt")){
-      write.table(bigramsTrain,
-                  file="data/final/en_US/ngram/en_US.dataTrain.2gram.txt", sep=",",
-                  col.names=FALSE, row.names=FALSE, quote=FALSE)}
+if(!file.exists("data/final/en_US/ngram/en_US.dataTrain.2gram.rds")){
+       saveRDS(bigramsTrain,
+                  file="data/final/en_US/ngram/en_US.dataTrain.2gram.rds")}
 
-if(!file.exists("data/final/en_US/ngram/en_US.dataTrain.3gram.txt")){
-      write.table(trigramsTrain,
-                  file="data/final/en_US/ngram/en_US.dataTrain.3gram.txt", sep=",",
-                  col.names=FALSE, row.names=FALSE, quote=FALSE)}
+if(!file.exists("data/final/en_US/ngram/en_US.dataTrain.3gram.rds")){
+       saveRDS(trigramsTrain,
+                  file="data/final/en_US/ngram/en_US.dataTrain.3gram.rds")}
 
-if(!file.exists("data/final/en_US/ngram/en_US.dataTrain.4gram.txt")){
-      write.table(quadgramsTrain,
-                  file="data/final/en_US/ngram/en_US.dataTrain.4gram.txt", sep=",",
-                  col.names=FALSE, row.names=FALSE, quote=FALSE)}
-
+if(!file.exists("data/final/en_US/ngram/en_US.dataTrain.4gram.rds")){
+       saveRDS(quadgramsTrain,
+                  file="data/final/en_US/ngram/en_US.dataTrain.4gram.rds")}
 ```
 
 ## Calculating Probabilities.
@@ -287,8 +282,6 @@ kneserNay <- function(ngrams, d) {
       # Put it all together
       probabilities <- discounts / noLast + lambda * pContinuation / length(ngrams)
       return(probabilities)
-      
-      
 }
 ```
 
@@ -332,27 +325,24 @@ quadProbs <- quadProbs %>% filter(Probability > 0.0001) %>%
 Write the probability data frames to file for backup.
 
 ```{r probDFWrite}
-if(!file.exists("data/final/en_US/predict/en_US.dataTrain.1gram.prob.txt")){
-      write.table(uniProbs,
-                  file="data/final/en_US/predict/en_US.dataTrain.1gram.prob.txt",
-                  sep=",", col.names=TRUE, row.names=FALSE, quote=FALSE)}
+if(!file.exists("data/final/en_US/predict/en_US.dataTrain.1gram.prob.rds")){
+      saveRDS(uniProbs,
+                  file="data/final/en_US/predict/en_US.dataTrain.1gram.prob.rds")}
 
-if(!file.exists("data/final/en_US/predict/en_US.dataTrain.2gram.prob.txt")){
-      write.table(biProbs,
-                  file="data/final/en_US/predict/en_US.dataTrain.2gram.prob.txt",
-                  sep=",", col.names=TRUE, row.names=FALSE, quote=FALSE)}
+if(!file.exists("data/final/en_US/predict/en_US.dataTrain.2gram.prob.rds")){
+      saveRDS(biProbs,
+                  file="data/final/en_US/predict/en_US.dataTrain.2gram.prob.rds")}
 
-if(!file.exists("data/final/en_US/predict/en_US.dataTrain.3gram.prob.txt")){
-      write.table(triProbs,
-                  file="data/final/en_US/predict/en_US.dataTrain.3gram.prob.txt",
-                  sep=",", col.names=TRUE, row.names=FALSE, quote=FALSE)}
+if(!file.exists("data/final/en_US/predict/en_US.dataTrain.3gram.prob.rds")){
+      saveRDS(triProbs,
+                  file="data/final/en_US/predict/en_US.dataTrain.3gram.prob.rds")}
 
-if(!file.exists("data/final/en_US/predict/en_US.dataTrain.4gram.prob.txt")){
-      write.table(quadProbs,
-                  file="data/final/en_US/predict/en_US.dataTrain.4gram.prob.txt",
-                  sep=",", col.names=TRUE, row.names=FALSE, quote=FALSE)}
-
+if(!file.exists("data/final/en_US/predict/en_US.dataTrain.4gram.prob.rds")){
+      saveRDS(quadProbs,
+                  file="data/final/en_US/predict/en_US.dataTrain.4gram.prob.rds")}
 ```
+
+Create the data frame for the predictor function based on frequency/count.
 
 ```{r freqDF, cache=TRUE}
 uniFreq <- data.frame("Words"=names(unigramsTrain),
@@ -377,26 +367,24 @@ quadFreq <- quadFreq %>% filter(Freq > 1) %>% arrange(desc(Freq))
 rm(unigramsTrain); rm(bigramsTrain); rm(trigramsTrain); rm(quadgramsTrain)
 ```
 
+Write the freqyency/count data frames to file for backup.
+
 ```{r freqDFWrite}
-if(!file.exists("data/final/en_US/predict/en_US.dataTrain.1gram.freq.txt")){
-      write.table(uniFreq,
-                  file="data/final/en_US/predict/en_US.dataTrain.1gram.freq.txt",
-                  sep=",", col.names=TRUE, row.names=FALSE, quote=FALSE)}
+if(!file.exists("data/final/en_US/predict/en_US.dataTrain.1gram.freq.rds")){
+      saveRDS(uniFreq,
+                  file="data/final/en_US/predict/en_US.dataTrain.1gram.freq.rds")}
 
-if(!file.exists("data/final/en_US/predict/en_US.dataTrain.2gram.freq.txt")){
-      write.table(biFreq,
-                  file="data/final/en_US/predict/en_US.dataTrain.2gram.freq.txt",
-                  sep=",", col.names=TRUE, row.names=FALSE, quote=FALSE)}
+if(!file.exists("data/final/en_US/predict/en_US.dataTrain.2gram.freq.rds")){
+      saveRDS(biFreq,
+                  file="data/final/en_US/predict/en_US.dataTrain.2gram.freq.rds")}
 
-if(!file.exists("data/final/en_US/predict/en_US.dataTrain.3gram.freq.txt")){
-      write.table(triFreq,
-                  file="data/final/en_US/predict/en_US.dataTrain.3gram.freq.txt",
-                  sep=",", col.names=TRUE, row.names=FALSE, quote=FALSE)}
+if(!file.exists("data/final/en_US/predict/en_US.dataTrain.3gram.freq.rds")){
+      saveRDS(triFreq,
+                  file="data/final/en_US/predict/en_US.dataTrain.3gram.freq.rds")}
 
-if(!file.exists("data/final/en_US/predict/en_US.dataTrain.4gram.freq.txt")){
-      write.table(quadFreq,
-                  file="data/final/en_US/predict/en_US.dataTrain.4gram.freq.txt",
-                  sep=",", col.names=TRUE, row.names=FALSE, quote=FALSE)}
+if(!file.exists("data/final/en_US/predict/en_US.dataTrain.4gram.freq.rds")){
+      saveRDS(quadFreq,
+                  file="data/final/en_US/predict/en_US.dataTrain.4gram.freq.rds")}
 
 ```
 
@@ -474,10 +462,9 @@ freqTest <- data.frame("First.Prediction"=freqTest[,1],
 Write frequency/count predictions to file as backup.
 
 ```{r freqPredictWrite}
-if(!file.exists("data/final/en_US/test/en_US.freqTest.predict.txt")){
-      write.table(freqTest,
-                  file="data/final/en_US/test/en_US.freqTest.predict.txt",
-                  sep=",", col.names=TRUE, row.names=FALSE, quote=FALSE)}
+if(!file.exists("data/final/en_US/test/en_US.freqTest.predict.rds")){
+      saveRDS(freqTest,
+                  file="data/final/en_US/test/en_US.freqTest.predict.rds")}
 ```
 
 Apply the probability predictor function to the test data and time the run duration.
@@ -503,10 +490,9 @@ probTest <- data.frame("First.Prediction"=probTest[,1],
 Write probability predictions to file as backup.
 
 ```{r probPredictWrite}
-if(!file.exists("data/final/en_US/test/en_US.probTest.predict.txt")){
-      write.table(probTest,
-                  file="data/final/en_US/test/en_US.probTest.predict.txt",
-                  sep=",", col.names=TRUE, row.names=FALSE, quote=FALSE)}
+if(!file.exists("data/final/en_US/test/en_US.probTest.predict.rds")){
+      saveRDS(probTest,
+                  file="data/final/en_US/test/en_US.probTest.predict.rds")}
 ```
 
 ## Results
