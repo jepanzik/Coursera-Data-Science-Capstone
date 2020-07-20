@@ -1,0 +1,222 @@
+---
+title: "Milestone Report"
+author: "Joseph E. Panzik"
+date: "July 7, 2020"
+output: html_document
+---
+
+## Overview
+The Milestone Report for the Coursera Data Science Capstone Project is intended to look at and analyze some basic features of text data provided from three sources: blogs, news, and tweets.
+
+This report shows the following about each of the text files:  
+- File size in Mb  
+- Number of lines  
+- Word count  
+- Data cleaning/preprocessing process  
+- Histograms and word clouds of unique words (Only for blogs)  
+- Histograms and word clouds of unique words without stop words (excludes: the, if, etc.)  
+
+
+## Load Libraries
+This loads the various libraries used in the document.
+```{r libraries, message=FALSE}
+library(knitr)
+library(ngram)
+library(kableExtra)
+library(corpus)
+library(tm)
+library(tidyverse)
+library(tidytext)
+library(ggplot2)
+library(wordcloud)
+library(RColorBrewer)
+```
+
+
+## Acquiring the Data
+The data is downloaded from <https://d396qusza40orc.cloudfront.net/dsscapstone/dataset/Coursera-SwiftKey.zip> and unzipped into a data folder in the current working directory. This step also creates the other directories (tidy and ngram) used during the project. The following is only be done if the directories and data do not already exist in the current working directory.
+
+```{r dataAcquire}
+if(!file.exists("data")){dir.create("data")}
+if(!file.exists("data/Coursera-SwiftKey.zip")){
+      download.file("https://d396qusza40orc.cloudfront.net/dsscapstone/dataset/Coursera-SwiftKey.zip",
+                    destfile="data/Coursera-SwiftKey.zip",mode = "wb")
+      }
+if(!file.exists("data/final")){
+      unzip(zipfile="data/Coursera-SwiftKey.zip",exdir="data")
+      }
+if(!file.exists("data/final/en_US/tidy")){dir.create("data/final/en_US/tidy")}
+if(!file.exists("data/final/en_US/ngram")){dir.create("data/final/en_US/ngram")}
+```
+
+
+## Load the Data
+The first thing is to load the data into variables for use.
+
+```{r loadData}
+blogLines <- readLines("data/final/en_US/en_US.blogs.txt",
+                          encoding="UTF-8", skipNul = TRUE)
+newsLines <- readLines("data/final/en_US/en_US.news.txt",
+                          encoding="UTF-8", skipNul = TRUE)
+twitterLines <- readLines("data/final/en_US/en_US.twitter.txt",
+                          encoding="UTF-8", skipNul = TRUE)
+```
+
+
+## Data File Properties
+This now looks at various properties of each data file within the English language (data/final/en_US) directory only.
+
+```{r Properties, cache=TRUE}
+dataInfo <- data.frame(
+      "File.Size"=c(file.info("data/final/en_US/en_US.blogs.txt")$size/(2^20), file.info("data/final/en_US/en_US.news.txt")$size/(2^20), file.info("data/final/en_US/en_US.twitter.txt")$size/(2^20)),
+      "Line.Count"=c(length(blogLines), length(newsLines), length(twitterLines)),
+      "Word.Count"=c(wordcount(blogLines, sep=" ", count.function = sum), wordcount(newsLines, sep=" ", count.function = sum), wordcount(twitterLines, sep=" ", count.function = sum))
+      )
+row.names(dataInfo) <- c("Blogs", "News", "Twitter")
+kable(dataInfo, align = "c") %>% 
+      kable_styling(bootstrap_options = c("striped", "hover"), full_width = F) %>%
+      column_spec(1, bold = T, border_right = T) %>%
+      footnote(general = "All file sizes are in Mb.")
+```
+
+## Cleaning the Data
+The raw data has not been cleaned which means that the text includes lowercase and capital letters, numbers, spelling errors, non-alphanumeric characters, etc. Tidying the data removes many of these complications. The following tidies the text data and saves it to a new text file in the tidy directory using a created function tidyText.
+
+```{r tidy, warning=FALSE}
+tidyText <- function(inputVar, outputFile){
+   #Input variable
+   lines <- inputVar
+   #Convert lines from text file into a corpus object for cleaning
+   post <- Corpus(VectorSource(lines))
+   #Convert to all lowercase letter
+   post <- tm_map(post,content_transformer(tolower))
+   #Remove numbers
+   post <- tm_map(post, removeNumbers)
+   #Create user-defined cleaning transformation.
+   #This will take in a user-defined pattern and convert it to nothing
+   removePattern <- content_transformer(function(x, pattern) gsub(pattern, "", x))
+   #Remove @, #, http://, and https://
+   post <- tm_map(post, removePattern, "([^[:space:]]*)(@|#|http://|https://)([^[:space:]]*)")
+   #Remove any character that isn't alphanumeric, a space, or a .
+   post <- tm_map(post, removePattern, "[^a-zA-Z0-9_. ]+")
+   #Remove an lingering punctuation
+   post <- tm_map(post, removePunctuation)
+   #Remove extra whitespace between characters
+   post <- tm_map(post, stripWhitespace)
+   #Remove white space at the beginning and end of strings
+   post <- tm_map(post, removePattern, "^\\s+|\\s+$")
+   #Convert corpus object back to a data frame with cleaned text
+   #post <- data.frame(text=sapply(post, identity), stringsAsFactors=F)
+   post <- sapply(post, identity)
+   #Write cleaned text to a txt file
+   write.table(post, file=outputFile, sep="", col.names=FALSE,
+               row.names=FALSE, quote=FALSE)
+   }
+if(!file.exists("data/final/en_US/tidy/en_US.blogs.tidy.txt")){
+   tidyText(blogLines,"data/final/en_US/tidy/en_US.blogs.tidy.txt")
+}
+if(!file.exists("data/final/en_US/tidy/en_US.news.tidy.txt")){
+   tidyText(newsLines,"data/final/en_US/tidy/en_US.news.tidy.txt")
+}
+if(!file.exists("data/final/en_US/tidy/en_US.twitter.tidy.txt")){
+   tidyText(twitterLines,"data/final/en_US/tidy/en_US.twitter.tidy.txt")
+}
+```
+
+
+## Analyzing the Data
+Unigrams of the newly cleaned data are created with and without stop words (the, if, etc.). The top 10 most used words are displayed in a table, and the top 30 most used words are displayed in a histogram and word cloud.
+
+```{r loadTidy}
+blogLines <- readLines("data/final/en_US/tidy/en_US.blogs.tidy.txt", encoding="UTF-8", skipNul = TRUE)
+newsLines <- readLines("data/final/en_US/tidy/en_US.news.tidy.txt", encoding="UTF-8", skipNul = TRUE)
+twitterLines <- readLines("data/final/en_US/tidy/en_US.twitter.tidy.txt", encoding="UTF-8", skipNul = TRUE)
+```
+
+```{r unigramCreate, cache=TRUE}
+blogUnigramStop <- term_stats(blogLines)
+blogUnigram <- term_stats(blogLines, subset=!term %in% stopwords_en)
+newsUnigram <- term_stats(newsLines, subset=!term %in% stopwords_en)
+twitterUnigram <- term_stats(twitterLines, subset=!term %in% stopwords_en)
+```
+
+
+### Blogs
+```{r blogUnigramDisplayCode, eval=FALSE}
+kable(head(blogUnigramStop, 10), align="c", caption="Blog Unigrams with Stop Words") %>% 
+      kable_styling(bootstrap_options = c("striped", "hover"), full_width = F, position="float_left") %>%
+      column_spec(1, bold = T, border_right = T)
+kable(head(blogUnigram, 10), align="c", caption="Blog Unigrams without Stop Words") %>% 
+      kable_styling(bootstrap_options = c("striped", "hover"), full_width = F, position="right") %>%
+      column_spec(1, bold = T, border_right = T)
+```
+
+```{r blogUnigramDisplay, echo=FALSE}
+kable(head(blogUnigramStop, 10), align="c", caption="Blog Unigrams with Stop Words") %>% 
+      kable_styling(bootstrap_options = c("striped", "hover"), full_width = F, position="float_left") %>%
+      column_spec(1, bold = T, border_right = T)
+kable(head(blogUnigram, 10), align="c", caption="Blog Unigrams without Stop Words") %>% 
+      kable_styling(bootstrap_options = c("striped", "hover"), full_width = F, position="right") %>%
+      column_spec(1, bold = T, border_right = T)
+```
+
+
+```{r blogVisualization, fig.width=10, fig.height=6, fig.align="center"}
+ggplot(data=blogUnigramStop[1:30,], aes(x=reorder(term,-count), y=count)) +
+      geom_bar(stat="identity", fill="green3") +
+      theme(axis.text.x = element_text(angle = 90)) +
+      ggtitle("Top 30 Blog Unigrams with Stop Words") +
+      xlab("Words") +
+      ylab("Count")
+wordcloud(words = blogUnigramStop$term, freq = blogUnigramStop$count, min.freq = 1, max.words=200, random.order=FALSE, rot.per=0.35, colors=brewer.pal(8, "Dark2"))
+ggplot(data=blogUnigram[1:30,], aes(x=reorder(term,-count), y=count)) +
+      geom_bar(stat="identity", fill="green3") +
+      theme(axis.text.x = element_text(angle = 90)) +
+      ggtitle("Top 30 Blog Unigrams without Stop Words") +
+      xlab("Words") +
+      ylab("Count")
+wordcloud(words = blogUnigram$term, freq = blogUnigram$count, min.freq = 1, max.words=200, random.order=FALSE, rot.per=0.35, colors=brewer.pal(8, "Dark2"))
+```
+
+
+### News
+It is clear from the blogs text that most unique words are stop words and will be removed from further consideration
+
+```{r newsUnigramDisplay}
+kable(head(newsUnigram, 10), align="c", caption="News Unigrams without Stop Words") %>% 
+      kable_styling(bootstrap_options = c("striped", "hover"), full_width = F, position="center") %>%
+      column_spec(1, bold = T, border_right = T)
+```
+
+```{r newsVisualization, fig.width=10, fig.height=6, fig.align="center"}
+ggplot(data=newsUnigram[1:30,], aes(x=reorder(term,-count), y=count)) +
+      geom_bar(stat="identity", fill="green3") +
+      theme(axis.text.x = element_text(angle = 90)) +
+      ggtitle("Top 30 News Unigrams without Stop Words") +
+      xlab("Words") +
+      ylab("Count")
+wordcloud(words = newsUnigram$term, freq = newsUnigram$count, min.freq = 1, max.words=200, random.order=FALSE, rot.per=0.35, colors=brewer.pal(8, "Dark2"))
+```
+
+
+### Twitter
+```{r twitterUnigramDisplayCode}
+kable(head(twitterUnigram, 10), align="c", caption="Twitter Unigrams without Stop Words") %>% 
+      kable_styling(bootstrap_options = c("striped", "hover"), full_width = F, position="center") %>%
+      column_spec(1, bold = T, border_right = T)
+```
+
+```{r twitterVisualization, fig.width=10, fig.height=6, fig.align="center"}
+ggplot(data=twitterUnigram[1:30,], aes(x=reorder(term,-count), y=count)) +
+      geom_bar(stat="identity", fill="green3") +
+      theme(axis.text.x = element_text(angle = 90)) +
+      ggtitle("Top 30 Twitter Unigrams without Stop Words") +
+      xlab("Words") +
+      ylab("Count")
+wordcloud(words = twitterUnigram$term, freq = twitterUnigram$count, min.freq = 1, max.words=200, random.order=FALSE, rot.per=0.35, colors=brewer.pal(8, "Dark2"))
+```
+
+
+## Conclusions
+It is clear from the unigrams that stop words dominate most of the text. After removing these, differing patterns emerge from the blogs, news, and Twitter sources. Blog text appears to have a strong prevalence for "one", "just", "like", "can", and "time". News text strongly favors the word "said", which is probably related to citing sources of information and quotations. Tweets have a distribution that tails off quickly after "im" (presumably "I'm") and "just".
+

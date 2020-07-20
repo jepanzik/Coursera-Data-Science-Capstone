@@ -1,0 +1,9 @@
+---
+output: html_document
+---
+
+This shiny app was done as a requirement for the Coursera Data science Capstone Project through Johns Hopkins University.
+
+The prediction algorithm for this app relies on a sequential ngram search based on the frequency that certain strings of words appear. The application first determines how many words were entered, then searches for matches in the highest ngram. An example is if you enter "I would love to", the predictor sees that as 4 words, but only takes the last 3 because it is restricted to a maximum ngram of 4 for efficiency. It searches the quadrgrams for as many matches of "would love to" as possible. If less than 5 are returned, it then searches trigrams for entries of "love to", then bigrams for "to", then the most common unigrams. An entry of "coding is" would begin its search in trigrams.
+
+Full documentation of the method used for this app is available [here](https://rpubs.com/jepanzik/DSCPFinal).

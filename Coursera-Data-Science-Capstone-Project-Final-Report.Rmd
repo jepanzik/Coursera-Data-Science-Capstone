@@ -1,0 +1,545 @@
+---
+title: "Coursera Data Science Capstone Project Final Documentation"
+author: "Joseph E. Panzik"
+date: "7/12/2020"
+output: html_document
+---
+
+## Executive Summary
+Though the use of a probability prediction algorithm that relies on Kneser-Ney smoothing is more accurate than one that solely relied on the frequency/count of ngrams, the difference in accuracy is less than 1%. This difference is insignificant compared to the computational time difference between the two. The probability prediction algorithm took 28.83 minutes to predict the first 1000 lines of the test data, while the frequency/count prediction algorithm only took 3.33 minutes.
+
+The difference in data file/variable file size is significant, with the probability predictors being 10x larger for quadgrams than the frequency/count equivalents.
+
+**I suggest using frequency/count as the method for basic next word prediction.**
+
+
+## Overview
+This report describes the process used to clean and prepare data for use with the algorithm used to predict the next words. It builds upon what has previously done in the Milestone Report and compares two methods of prediction- one based solely on ngram counts and the other based on Kneser-Ney smoothing of the ngrams.
+
+
+## Load Libraries
+This loads the various libraries used in the document.
+```{r libraries, message=FALSE}
+library(knitr)
+library(ngram)
+library(kableExtra)
+library(corpus)
+library(tm)
+library(tidyverse)
+library(tidytext)
+library(ggplot2)
+library(wordcloud)
+library(RColorBrewer)
+library(stringr)
+library(dplyr)
+```
+
+
+## Acquiring the Data
+The data is downloaded from <https://d396qusza40orc.cloudfront.net/dsscapstone/dataset/Coursera-SwiftKey.zip> and unzipped into a data folder in the current working directory. This step also creates the other directories (tidy and ngram) used during the project. The following is only be done if the directories and data do not already exist in the current working directory.
+
+```{r dataAcquire}
+if(!file.exists("data")){dir.create("data")}
+if(!file.exists("data/Coursera-SwiftKey.zip")){
+      download.file("https://d396qusza40orc.cloudfront.net/dsscapstone/dataset/Coursera-SwiftKey.zip",
+                    destfile="data/Coursera-SwiftKey.zip",mode = "wb")
+      }
+if(!file.exists("data/final")){
+      unzip(zipfile="data/Coursera-SwiftKey.zip",exdir="data")
+      }
+if(!file.exists("data/final/en_US/tidy")){dir.create("data/final/en_US/tidy")}
+if(!file.exists("data/final/en_US/ngram")){dir.create("data/final/en_US/ngram")}
+if(!file.exists("data/final/en_US/predict")){dir.create("data/final/en_US/predict")}
+if(!file.exists("data/final/en_US/test")){dir.create("data/final/en_US/test")}
+```
+
+
+## Load the Data
+The first thing is to load the data into variables for use.
+
+```{r loadData, cache=TRUE}
+blogLines <- readLines("data/final/en_US/en_US.blogs.txt",
+                          encoding="UTF-8", skipNul = TRUE)
+newsLines <- readLines("data/final/en_US/en_US.news.txt",
+                          encoding="UTF-8", skipNul = TRUE)
+twitLines <- readLines("data/final/en_US/en_US.twitter.txt",
+                          encoding="UTF-8", skipNul = TRUE)
+```
+
+
+## Data File Properties
+This now looks at various properties of each data file within the English language (data/final/en_US) directory only.
+
+```{r Properties, cache=TRUE}
+dataInfo <- data.frame(
+      "File.Size"=c(file.info("data/final/en_US/en_US.blogs.txt")$size/(2^20), file.info("data/final/en_US/en_US.news.txt")$size/(2^20), file.info("data/final/en_US/en_US.twitter.txt")$size/(2^20)),
+      "Line.Count"=c(length(blogLines), length(newsLines), length(twitLines)),
+      "Word.Count"=c(wordcount(blogLines, sep=" ", count.function = sum), wordcount(newsLines, sep=" ", count.function = sum), wordcount(twitLines, sep=" ", count.function = sum))
+      )
+row.names(dataInfo) <- c("Blogs", "News", "Twitter")
+kable(dataInfo, align = "c") %>% 
+      kable_styling(bootstrap_options = c("striped", "hover"), full_width = F) %>%
+      column_spec(1, bold = T, border_right = T) %>%
+      footnote(general = "All file sizes are in Mb.")
+```
+
+
+## Split the Data
+The data is split into a training and test set. Because of how large the data is, I use 50% for the training data and 20% for the test data. The split is made for each of the three data files, which are then combined.
+
+```{r dataSplit, cache=TRUE}
+set.seed(8689)
+trainIndex <- sample(1:length(blogLines), 0.5 * length(blogLines))
+testIndex <- setdiff(1:length(blogLines), trainIndex)
+blogTrain <- blogLines[trainIndex]
+blogTest <- sample(blogLines[testIndex], size=0.4*length(blogLines[testIndex]))
+
+trainIndex <- sample(1:length(newsLines), 0.5 * length(newsLines))
+testIndex <- setdiff(1:length(newsLines), trainIndex)
+newsTrain <- newsLines[trainIndex]
+newsTest <- sample(newsLines[testIndex], size=0.4*length(newsLines[testIndex]))
+
+trainIndex <- sample(1:length(twitLines), 0.5 * length(twitLines))
+testIndex <- setdiff(1:length(twitLines), trainIndex)
+twitTrain <- twitLines[trainIndex]
+twitTest <- sample(twitLines[testIndex], size=0.4*length(twitLines[testIndex]))
+
+dataTrain <- c(blogTrain, newsTrain, twitTrain)
+dataTest <- c(blogTest, newsTest, twitTest)
+
+rm(blogLines); rm(newsLines); rm(twitLines); rm(blogTrain); rm(blogTest);
+rm(newsTrain); rm(newsTest); rm(twitTrain); rm(twitTest); rm(trainIndex);
+rm(testIndex)
+```
+
+## Cleaning the Data
+The raw data has not been cleaned which means that the text includes lowercase and capital letters, numbers, spelling errors, non-alphanumeric characters, etc. Tidying the data removes many of these complications. The following tidies the text data and saves it to a new text file in the tidy directory using a created function tidyText.
+
+```{r tidyFunction, warning=FALSE}
+tidyText <- function(input){
+   names(input) = "text"
+   #Convert lines from text file into a corpus object for cleaning
+   post <- Corpus(VectorSource(input))
+   #Convert to all lowercase letter
+   post <- tm_map(post,content_transformer(tolower))
+   #Remove numbers
+   post <- tm_map(post, removeNumbers)
+   #Create user-defined cleaning transformation.
+   #This will take in a user-defined pattern and convert it to nothing
+   removePattern <- content_transformer(function(x, pattern) gsub(pattern, "", x))
+   #Remove @, #, http://, and https://
+   post <- tm_map(post, removePattern, "([^[:space:]]*)(@|#|http://|https://)([^[:space:]]*)")
+   #Create user-defined cleaning transformation.
+   #This will split strings at periods
+   sentenceSplit <- content_transformer(function(x) unlist(strsplit(x, "(?<![^!?.])\\s+", perl=TRUE)))
+   #Split strings at periods, exclamations, or question marks
+   post <- tm_map(post, sentenceSplit)
+   #Create user-defined cleaning transformation.
+   #This will add " STOP" to the end of a string
+   addStop <- content_transformer(function(x, pattern) paste0(x, " STOP"))
+   #Remove an lingering punctuation
+   post <- tm_map(post, addStop)
+   #Remove any character that isn't alphanumeric, a space, or a .
+   post <- tm_map(post, removePattern, "[^a-zA-Z0-9_. ]+")
+   #Remove an lingering punctuation
+   post <- tm_map(post, removePunctuation)
+   #Remove extra whitespace between characters
+   post <- tm_map(post, stripWhitespace)
+   #Remove white space at the beginning and end of strings
+   post <- tm_map(post, removePattern, "^\\s+|\\s+$")
+   #Convert corpus object back to a data frame with cleaned text
+   #post <- data.frame(text=sapply(post, identity), stringsAsFactors=F)
+   post <- sapply(post, identity)
+   #Remove empty strings
+   post <- post[post != ""]
+   #Write cleaned text to a txt file
+   return(post)
+}
+```
+
+Apply the tidyText function to training and test data.
+
+```{r dataTidy, cache=TRUE, warning=FALSE}
+dataTrain <- tidyText(dataTrain)
+dataTest <- tidyText(dataTest)
+```
+
+Write the tidied training and test data sets to files as backups if they don't exist.
+
+```{r tidyWrite}
+if(!file.exists("data/final/en_US/tidy/en_US.dataTrain.tidy.txt")){
+      write.table(dataTrain,
+                  file="data/final/en_US/tidy/en_US.dataTrain.tidy.txt", sep="",
+                  col.names=FALSE, row.names=FALSE, quote=FALSE)
+}
+if(!file.exists("data/final/en_US/tidy/en_US.dataTest.tidy.txt")){
+      write.table(dataTest,
+                  file="data/final/en_US/tidy/en_US.dataTest.tidy.txt", sep="",
+                  col.names=FALSE, row.names=FALSE, quote=FALSE)
+}
+```
+
+
+### Creating ngrams
+From the tidied data ngrams are created from the training data that will be used to train the predictor function.
+
+The ngrams are made from a user-created function.
+
+```{r ngramFunction}
+#Function that takes an input variable and writes ngrams to file
+ngramCreate <- function(ngram, n=1){
+   #Load data & split each word
+   if(n==2){
+      ngram <- paste(ngram, ngram[-1])
+   } else if (n==3){
+      ngram <- paste(ngram, ngram[-1], ngram[-c(1:2)])
+   } else if (n==4){
+      ngram <- paste(ngram, ngram[-1], ngram[-c(1:2)], ngram[-c(1:3)])
+   } else if (n>4){
+      print("n is too large. Truncating at n=4.")
+      ngram <- paste(ngram, ngram[-1], ngram[-c(1:2)], ngram[-c(1:3)])
+   }
+   
+   ngram <- ngram[!grepl("STOP", ngram)]
+   ngram <- sort(table(ngram), decreasing=T)
+   
+   return(ngram)
+}
+```
+
+Create ngrams for the training and test data.
+
+```{r ngramTrain, cache=TRUE}
+dataTrain <- unlist(strsplit(dataTrain, " "))
+unigramsTrain <- ngramCreate(dataTrain,n=1)
+bigramsTrain <- ngramCreate(dataTrain,n=2)
+trigramsTrain <- ngramCreate(dataTrain,n=3)
+quadgramsTrain <- ngramCreate(dataTrain,n=4)
+rm(dataTrain)
+```
+
+Write the ngrams to files as a backup if they don't exist
+
+```{r ngramTrainWrite}
+if(!file.exists("data/final/en_US/ngram/en_US.dataTrain.1gram.txt")){
+      write.table(unigramsTrain,
+                  file="data/final/en_US/ngram/en_US.dataTrain.1gram.txt", sep=",",
+                  col.names=FALSE, row.names=FALSE, quote=FALSE)}
+
+if(!file.exists("data/final/en_US/ngram/en_US.dataTrain.2gram.txt")){
+      write.table(bigramsTrain,
+                  file="data/final/en_US/ngram/en_US.dataTrain.2gram.txt", sep=",",
+                  col.names=FALSE, row.names=FALSE, quote=FALSE)}
+
+if(!file.exists("data/final/en_US/ngram/en_US.dataTrain.3gram.txt")){
+      write.table(trigramsTrain,
+                  file="data/final/en_US/ngram/en_US.dataTrain.3gram.txt", sep=",",
+                  col.names=FALSE, row.names=FALSE, quote=FALSE)}
+
+if(!file.exists("data/final/en_US/ngram/en_US.dataTrain.4gram.txt")){
+      write.table(quadgramsTrain,
+                  file="data/final/en_US/ngram/en_US.dataTrain.4gram.txt", sep=",",
+                  col.names=FALSE, row.names=FALSE, quote=FALSE)}
+
+```
+
+## Calculating Probabilities.
+After creating ngrams from the training data, probabilities from a Kneser-Ney smoothing are determined.
+
+Functions are created that:  
+1) Get the last words of a string with a specified number of words (1=Last single word, 2=last pair of words, etc.)  
+2) Remove the last word from a string  
+3) Compute the Kneser-Ney probability
+
+```{r probFunctions}
+getLastWords <- function(inputString, numwords) {
+      pattern <- paste("[a-z']+( [a-z']+){", numwords - 1, "}$", sep="")
+      return(substring(inputString, str_locate(inputString, pattern)[,1]))
+}
+
+removeLastWord <- function(inputString) {
+      sub(" [a-z']+$", "", inputString)
+}
+
+
+kneserNay <- function(ngrams, d) {
+      n <- length(strsplit(names(ngrams[1]), " ")[[1]])
+      
+      # Special case for unigrams
+      if(n==1) {
+            noFirst <- unigramsTrain[getLastWords(names(bigramsTrain), 1)]
+            pContinuation <- table(names(noFirst))[names(unigramsTrain)] / length(bigramsTrain)
+            return(pContinuation)
+      }
+      
+      # Get needed counts
+      nMinusOne <- list(unigramsTrain, bigramsTrain, trigramsTrain)[[n-1]]
+      noLast <- nMinusOne[removeLastWord(names(ngrams))]
+      noFirst <- nMinusOne[getLastWords(names(ngrams), n-1)]
+      
+      # Calculate discounts, lambda and pContinuation
+      discounts <- ngrams - d
+      discounts[discounts < 0] <- 0
+      lambda <- d * table(names(noLast))[names(noLast)] / noLast
+      if(n == 2) pContinuation <- table(names(noFirst))[names(noFirst)] / length(ngrams)
+      else pContinuation <- kneserNay(noFirst, d)
+      
+      # Put it all together
+      probabilities <- discounts / noLast + lambda * pContinuation / length(ngrams)
+      return(probabilities)
+      
+      
+}
+```
+
+Apply the probability function to the training data ngrams.
+
+```{r trainingProb, cache=TRUE}
+uniProbs <- data.frame("Probability"=data.frame(kneserNay(unigramsTrain, 0.75))[,2])
+biProbs <- data.frame("Probability"=data.frame(kneserNay(bigramsTrain, 0.75))[,2])
+triProbs <- data.frame("Probability"=data.frame(kneserNay(trigramsTrain, 0.75))[,2])
+quadProbs <- data.frame("Probability"=data.frame(kneserNay(quadgramsTrain, 0.75))[,2])
+```
+
+## Predictor Algorithm Data Frames
+Create data frames of the ngrams with the first words of each string in the first variable, last word of each string in the second variable, and either the frequency or probability in the last variable. Unigrams only have two variables: the words, and frequencies or probabilities.
+
+Each data frame is filtered to reduce insignificant entries. For frequency, I chose to only use ngrams with more than 1 count, and probabilities greater than 0.0001.
+
+```{r probsDF, cache=TRUE}
+uniProbs <- data.frame("Words"=names(unigramsTrain),"Probability"=uniProbs)
+uniProbs <- uniProbs %>% arrange(desc(Probability))
+
+biProbs <- data.frame("FirstWords"=removeLastWord(names(bigramsTrain)),
+                      "LastWord" = getLastWords(names(bigramsTrain), 1),
+                      "Probability"=biProbs)
+biProbs <- biProbs %>% filter(Probability > 0.0001) %>%
+      arrange(desc(Probability))
+
+triProbs <- data.frame("FirstWords"=removeLastWord(names(trigramsTrain)),
+                       "LastWord" = getLastWords(names(trigramsTrain), 1),
+                       "Probability"=triProbs)
+triProbs <- triProbs %>% filter(Probability > 0.0001) %>%
+      arrange(desc(Probability))
+
+quadProbs <- data.frame("FirstWords"=removeLastWord(names(quadgramsTrain)),
+                        "LastWord" = getLastWords(names(quadgramsTrain), 1),
+                        "Probability"=quadProbs)
+quadProbs <- quadProbs %>% filter(Probability > 0.0001) %>%
+      arrange(desc(Probability))
+```
+
+Write the probability data frames to file for backup.
+
+```{r probDFWrite}
+if(!file.exists("data/final/en_US/predict/en_US.dataTrain.1gram.prob.txt")){
+      write.table(uniProbs,
+                  file="data/final/en_US/predict/en_US.dataTrain.1gram.prob.txt",
+                  sep=",", col.names=TRUE, row.names=FALSE, quote=FALSE)}
+
+if(!file.exists("data/final/en_US/predict/en_US.dataTrain.2gram.prob.txt")){
+      write.table(biProbs,
+                  file="data/final/en_US/predict/en_US.dataTrain.2gram.prob.txt",
+                  sep=",", col.names=TRUE, row.names=FALSE, quote=FALSE)}
+
+if(!file.exists("data/final/en_US/predict/en_US.dataTrain.3gram.prob.txt")){
+      write.table(triProbs,
+                  file="data/final/en_US/predict/en_US.dataTrain.3gram.prob.txt",
+                  sep=",", col.names=TRUE, row.names=FALSE, quote=FALSE)}
+
+if(!file.exists("data/final/en_US/predict/en_US.dataTrain.4gram.prob.txt")){
+      write.table(quadProbs,
+                  file="data/final/en_US/predict/en_US.dataTrain.4gram.prob.txt",
+                  sep=",", col.names=TRUE, row.names=FALSE, quote=FALSE)}
+
+```
+
+```{r freqDF, cache=TRUE}
+uniFreq <- data.frame("Words"=names(unigramsTrain),
+                       "Freq"=data.frame(unigramsTrain)[,2])
+uniFreq <- uniFreq %>% arrange(desc(Freq))
+
+biFreq <- data.frame("FirstWords"=removeLastWord(names(bigramsTrain)),
+                      "LastWord" = getLastWords(names(bigramsTrain), 1),
+                      "Freq"=data.frame(bigramsTrain)[,2])
+biFreq <- biFreq %>% filter(Freq > 1) %>% arrange(desc(Freq))
+
+triFreq <- data.frame("FirstWords"=removeLastWord(names(trigramsTrain)),
+                      "LastWord" = getLastWords(names(trigramsTrain), 1),
+                      "Freq"=data.frame(trigramsTrain)[,2])
+triFreq <- triFreq %>% filter(Freq > 1) %>% arrange(desc(Freq))
+
+quadFreq <- data.frame("FirstWords"=removeLastWord(names(quadgramsTrain)),
+                      "LastWord" = getLastWords(names(quadgramsTrain), 1),
+                      "Freq"=data.frame(quadgramsTrain)[,2])
+quadFreq <- quadFreq %>% filter(Freq > 1) %>% arrange(desc(Freq))
+
+rm(unigramsTrain); rm(bigramsTrain); rm(trigramsTrain); rm(quadgramsTrain)
+```
+
+```{r freqDFWrite}
+if(!file.exists("data/final/en_US/predict/en_US.dataTrain.1gram.freq.txt")){
+      write.table(uniFreq,
+                  file="data/final/en_US/predict/en_US.dataTrain.1gram.freq.txt",
+                  sep=",", col.names=TRUE, row.names=FALSE, quote=FALSE)}
+
+if(!file.exists("data/final/en_US/predict/en_US.dataTrain.2gram.freq.txt")){
+      write.table(biFreq,
+                  file="data/final/en_US/predict/en_US.dataTrain.2gram.freq.txt",
+                  sep=",", col.names=TRUE, row.names=FALSE, quote=FALSE)}
+
+if(!file.exists("data/final/en_US/predict/en_US.dataTrain.3gram.freq.txt")){
+      write.table(triFreq,
+                  file="data/final/en_US/predict/en_US.dataTrain.3gram.freq.txt",
+                  sep=",", col.names=TRUE, row.names=FALSE, quote=FALSE)}
+
+if(!file.exists("data/final/en_US/predict/en_US.dataTrain.4gram.freq.txt")){
+      write.table(quadFreq,
+                  file="data/final/en_US/predict/en_US.dataTrain.4gram.freq.txt",
+                  sep=",", col.names=TRUE, row.names=FALSE, quote=FALSE)}
+
+```
+
+## Prepare Test Data
+The test data is now split into the the last word in the string and the rest of the string. The first part of the string will be used as an input to the predictor function. The output of the predictor function will be compared to the actual last word of the string to determine accuracy. After multiple attempts at compiling the predictor function, I took a final subset of 1000 of the test data for the sake of time. The "STOP" was removed from the end of each line.
+
+```{r testPrep, cache=TRUE}
+dataTest <- dataTest[1:1000]
+dataTest <- gsub(" STOP", "", dataTest)
+inputTest <- removeLastWord(dataTest)
+lastTest <- data.frame("Last.Word"=getLastWords(dataTest, 1))
+```
+
+## Apply Predictor Functions
+Predictors functions are developed that will take the input string from the test data and determine the top 5 most likely last words based on probability and frequency (counts).
+
+```{r predictFunctions}
+predictorProb <- function(input) {
+      n <- length(strsplit(input, " ")[[1]])
+      prediction <- c()
+      if(n >= 3 && length(unique(prediction))<5){
+            prediction <- c(prediction, filter(quadProbs, getLastWords(input, 3) == FirstWords)$LastWord)
+      }
+      if(n >= 2 && length(unique(prediction))<5){
+            prediction <- c(prediction, filter(triProbs, getLastWords(input, 2) == FirstWords)$LastWord)
+      }
+      if(n >= 1 && length(unique(prediction))<5) {
+            prediction <- c(prediction, filter(biProbs, getLastWords(input, 1) == FirstWords)$LastWord)
+      }
+      if(length(prediction)<5){
+            prediction <- c(prediction, uniProbs$Words)
+            }
+      return(unique(prediction)[1:5])
+}
+
+predictorFreq <- function(input) {
+      n <- length(strsplit(input, " ")[[1]])
+      prediction <- c()
+      if(n >= 3 && length(unique(prediction))<5){
+            prediction <- c(prediction, filter(quadFreq, getLastWords(input, 3) == FirstWords)$LastWord)
+      }
+      if(n >= 2 && length(unique(prediction))<5){
+            prediction <- c(prediction, filter(triFreq, getLastWords(input, 2) == FirstWords)$LastWord)
+      }
+      if(n >= 1 && length(unique(prediction))<5) {
+            prediction <- c(prediction, filter(biFreq, getLastWords(input, 1) == FirstWords)$LastWord)
+      }
+      if(length(prediction)<5){
+            prediction <- c(prediction, uniFreq$Words)
+            }
+      return(unique(prediction)[1:5])
+}
+```
+
+Apply the frequency/count predictor function to the test data and time the run duration.
+
+```{r freqPredict, cache=TRUE}
+freqTime <- Sys.time()
+for(i in 1:length(inputTest)){
+      if(i==1){
+            freqTest <- predictorFreq(inputTest[i])
+      } else{
+            freqTest <- rbind(freqTest, predictorFreq(inputTest[i]))
+      }
+}
+freqTime <- Sys.time()-freqTime
+
+freqTest <- data.frame("First.Prediction"=freqTest[,1],
+                       "Second.Prediction"=freqTest[,2],
+                       "Third.Prediction"=freqTest[,3],
+                       "Fourth.Prediction"=freqTest[,4],
+                       "Fifth.Prediction"=freqTest[,5])
+```
+
+Write frequency/count predictions to file as backup.
+
+```{r freqPredictWrite}
+if(!file.exists("data/final/en_US/test/en_US.freqTest.predict.txt")){
+      write.table(freqTest,
+                  file="data/final/en_US/test/en_US.freqTest.predict.txt",
+                  sep=",", col.names=TRUE, row.names=FALSE, quote=FALSE)}
+```
+
+Apply the probability predictor function to the test data and time the run duration.
+
+```{r probPredict, cache=TRUE}
+probTime <- Sys.time()
+for(i in 1:length(inputTest)){
+      if(i==1){
+            probTest <- predictorProb(inputTest[i])
+      } else{
+            probTest <- rbind(probTest, predictorProb(inputTest[i]))
+      }
+}
+probTime <- Sys.time()-probTime
+
+probTest <- data.frame("First.Prediction"=probTest[,1],
+                       "Second.Prediction"=probTest[,2],
+                       "Third.Prediction"=probTest[,3],
+                       "Fourth.Prediction"=probTest[,4],
+                       "Fifth.Prediction"=probTest[,5])
+```
+
+Write probability predictions to file as backup.
+
+```{r probPredictWrite}
+if(!file.exists("data/final/en_US/test/en_US.probTest.predict.txt")){
+      write.table(probTest,
+                  file="data/final/en_US/test/en_US.probTest.predict.txt",
+                  sep=",", col.names=TRUE, row.names=FALSE, quote=FALSE)}
+```
+
+## Results
+
+After running the predictor function using both probability and frequency, there appear to be some differences.
+
+The below tables show whether any of the 5 predicted last words match the actual last words of the 1000 test data. TRUE means the real last word was matched in any of the 5 predicted words, FALSE indicates none of the 5 returned predicted words matches the actual last word.
+
+```{r probComparison}
+probResults <- lastTest == probTest$First.Prediction |
+      lastTest == probTest$Second.Prediction |
+      lastTest == probTest$Third.Prediction |
+      lastTest == probTest$Fourth.Prediction |
+      lastTest == probTest$Fifth.Prediction
+
+probAcc <- table(probResults)[2]/10
+
+kable(table(probResults))
+```
+
+```{r freqComparison}
+freqResults <- lastTest == freqTest$First.Prediction |
+      lastTest == freqTest$Second.Prediction |
+      lastTest == freqTest$Third.Prediction |
+      lastTest == freqTest$Fourth.Prediction |
+      lastTest == freqTest$Fifth.Prediction
+
+freqAcc <- table(freqResults)[2]/10
+
+kable(table(freqResults))
+```
+
+## Conclusions
+Comparing the results from the probability predictor and frequency predictor show us that the probability predictor is more accurate at `r probAcc`%, vs `r freqAcc`% for the frequency/count predictor. The difference between the two is less than 1% accuracy.
+
+The real difference is between the time it takes each predictor to run. For the first 1000 lines of the test data it takes the probability predictor `r round(probTime, digits=2)` minutes, and takes the frequency/count predictor `r round(freqTime, digits=2)` minutes to complete. Though the frequency/count predictor is very slightly less accurate, it is significantly more efficient.
